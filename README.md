@@ -1,6 +1,8 @@
 # MovieSlider
 Embeddable Matlab panel for playback, scrolling, and contrast/color map adjustment of 3D movies.
 
+![screenshot](screenshot.png "MovieSlider display and configuration")
+
 ## Dependencies
 This software depends on the [GUI Layout Toolbox](http://www.mathworks.com/matlabcentral/fileexchange/47982-gui-layout-toolbox). Make sure to get the version appropriate for your version of Matlab (R2014b onwards vs. older).
 
