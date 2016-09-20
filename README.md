@@ -1,12 +1,6 @@
 # MovieSlider
 Embeddable Matlab panel for playback, scrolling, and contrast/color map adjustment of 3D movies.
 
-### Author
-Sue Ann Koay (koay@princeton.edu)
-### Acknowledgements
-The GUI icons are creations of [Olha Kozachenko](https://www.iconfinder.com/olgakozachenko) that were made public under the Creative Commons license.
-
-
 ## Dependencies
 This software depends on the [GUI Layout Toolbox](http://www.mathworks.com/matlabcentral/fileexchange/47982-gui-layout-toolbox). Make sure to get the version appropriate for your version of Matlab (R2014b onwards vs. older).
 
@@ -32,4 +26,10 @@ Various member functions exists for programatic control of some features:
   setFrame(index)               : Sets the current frame to the given index
   setFocusReturn(fcnReturn)     : Sets the function to call upon an 'escape' keypress
 ```
+
+# Author
+Sue Ann Koay (koay@princeton.edu)
+
+### Acknowledgements
+The GUI icons are creations of [Olha Kozachenko](https://www.iconfinder.com/olgakozachenko) that were made public under the Creative Commons license.
 
