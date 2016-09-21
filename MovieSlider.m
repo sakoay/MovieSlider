@@ -442,7 +442,7 @@ classdef MovieSlider < uix.VBox
         saturation          = MovieSlider.CONTRAST_RANGE(obj.contrastIndex);
         sel                 = [1, 1 + find(diff(obj.pixelCDF) ~= 0)];
         
-        iValue              = binarySearch(obj.pixelCDF(sel), [saturation, 1-saturation], 0, 0.5);
+        iValue              = interp1(obj.pixelCDF(sel), 1:numel(sel), [saturation, 1-saturation], 'linear', 'extrap');
         obj.pixelRange      = obj.pixelValue([1 end]);
         inRange             = iValue > 1 & iValue < numel(sel);
         iValue              = iValue(inRange);
