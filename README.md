@@ -30,7 +30,7 @@ Various member functions exists for programatic control of some features:
 ```
 
 # Author
-Sue Ann Koay (koay@princeton.edu)
+Copyright (C) 2016 Sue Ann Koay (koay@princeton.edu)
 
 ### Acknowledgements
 The GUI icons are creations of [Olha Kozachenko](https://www.iconfinder.com/olgakozachenko) that were made public under the Creative Commons license.
