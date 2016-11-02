@@ -15,7 +15,12 @@
 % Example usage:
 %   shape = normpdf(-2.5:0.05:2.5, 0, 1);
 %   tensor = bsxfun(@times, bsxfun(@times, shape, shape'), reshape(shape,1,1,[]));
-%   MovieSlider(tensor);
+%   movie = MovieSlider(tensor);
+%
+% Example of additional graphics drawn per frame:
+%   hMark = line('Parent', movie.axsMovie, 'XData', [], 'YData', [], 'LineWidth', 2, 'Color', [1 1 1], 'Marker', 'o', 'MarkerSize', 8);
+%   time = ( 0:size(tensor,3) )'; values = [size(tensor,2)/2 + 40*sin(time/5), size(tensor,1)/2 + 40*cos(time/8)];
+%   movie.addIllustrations(hMark, {'XData', 'YData'}, num2cell(values));
 %
 % Various member functions exists for programatic control of some features:
 %   show(...)                     : Sets the currently displayed movie (can also be done at
@@ -96,6 +101,8 @@ classdef MovieSlider < uix.VBox
     hZoom
     
     fcnReturn
+    illusProperty         = {}
+    illusValue            = {}
     
     lsnScroll
     tmrPlayback
@@ -123,6 +130,7 @@ classdef MovieSlider < uix.VBox
     axsMovie
     imgMovie
     titleMovie            = gobjects(1)
+    illustration          = gobjects(0)
   end
   properties
     overlay               = struct()
@@ -384,6 +392,24 @@ classdef MovieSlider < uix.VBox
       end
     end
 
+    %----- Sets per-frame updates for illustration objects
+    %   Input:
+    %     handle      : a graphics handle to set the properties of per frame
+    %     properties  : a length p cell array of properties to set
+    %     values      : an n-by-p cell array of property values, where n is the number of frames and
+    %                   p the number of properties
+    function addIllustrations(obj, handle, properties, values)
+      
+      for iIllus = 1:numel(handle)
+        obj.illustration(end+1)   = handle;
+        obj.illusProperty{end+1}  = properties;
+        obj.illusValue{end+1}     = values(:,:,iIllus);
+      end
+      
+      obj.drawFrame(obj.currentFrame, true);
+      
+    end
+    
     %----- Sets the current frame to the given index
     function setFrame(obj, handle, event, index)
       if nargin < 3
@@ -391,11 +417,6 @@ classdef MovieSlider < uix.VBox
       end
       if index ~= obj.currentFrame
         set(obj.sldFrame, 'Value', index);
-        
-        if ~isempty(obj.frameTitle)
-          set(obj.titleMovie, 'String', obj.frameTitle{obj.currentFrame});
-        end
-        
         obj.drawFrame(index);
       end
     end
@@ -497,19 +518,41 @@ classdef MovieSlider < uix.VBox
     end
     
     %----- Callback for scrolling between frames
-    function drawFrame(obj, handle, event)
+    function drawFrame(obj, handle, event, doForce)
+      
+      % Frame to set the currently displayed one to
       if isnumeric(handle)
         iFrame    = handle;
       else
         iFrame    = min(size(obj.movie,3), max(1, round(get(handle, 'Value'))));
       end
+      if nargin > 2 && islogical(event)
+        doForce   = event;
+      elseif nargin < 4
+        doForce   = false;
+      end
       
-      if iFrame ~= obj.currentFrame
+      % Update frame only if different from previous
+      if doForce || iFrame ~= obj.currentFrame
         set(obj.imgMovie, 'CData', obj.movie(:,:,iFrame), 'UserData', iFrame);
         obj.currentFrame      = iFrame;
         set(obj.txtInfo, 'String', sprintf('%d/%d', iFrame, size(obj.movie,3)));
+        
+        % Update title per frame
+        if ~isempty(obj.frameTitle)
+          set(obj.titleMovie, 'String', obj.frameTitle{iFrame});
+        end
+        
+        % Update illustration objects per frame
+        for iIllus = 1:numel(obj.illustration)
+          prop    = [ obj.illusProperty{iIllus}           ...
+                    ; obj.illusValue{iIllus}(iFrame,:)    ...
+                    ];
+          set( obj.illustration(iIllus), prop{:} );
+        end
       end
       
+      % Scroll to the same frame for all associated MovieSlider siblings
       obj.checkSiblings();
       for iSib = 1:numel(obj.syncSiblings)
         other     = obj.syncSiblings(iSib);
@@ -521,9 +564,10 @@ classdef MovieSlider < uix.VBox
         end
       end
     
+      % Set input focus and refresh graphics
       set(obj.figParent, 'CurrentAxes', obj.axsMovie);
-      
       drawnow;
+      
     end
     
     %----- Callback to load the next frame in playback mode
