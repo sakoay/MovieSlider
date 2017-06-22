@@ -32,6 +32,8 @@
 %   setFrame(index)               : Sets the current frame to the given index
 %   setFocusReturn(fcnReturn)     : Sets the function to call upon an 'escape' keypress
 % 
+% Movies including illustrations can be converted to a standard output format (.avi, .mp4 etc.)
+% using the function save().
 %
 % Author:  Sue Ann Koay (koay@princeton.edu)
 % Acknowledgements: 
@@ -143,7 +145,7 @@ classdef MovieSlider < uix.VBox
     %----- Constructor
     function obj = MovieSlider(parent, varargin)
       
-      % Default arguments and parent class constructor
+      %% Default arguments and parent class constructor
       if nargin < 1
         parent          = figure;
       elseif isnumeric(parent) || numel(parent) > 1 || ~ishghandle(parent)
@@ -153,7 +155,7 @@ classdef MovieSlider < uix.VBox
       obj@uix.VBox( 'Parent', parent );
       
       
-      % Movie frame display
+      %% Movie frame display
       obj.axsMovie      = axes      ( 'Parent'                  , uicontainer('Parent', obj)                    ...
                                     , 'ActivePositionProperty'  , 'Position'                                    ...
                                     , 'Box'                     , 'on'                                          ...
@@ -168,7 +170,7 @@ classdef MovieSlider < uix.VBox
                                     );
       hold(obj.axsMovie, 'on');
 
-      % Movie info and controls
+      %% Movie info and controls
       obj.cntControl    = uix.HBox  ( 'Parent'                  , obj                                           ...
                                     );
       obj.txtDummy      = uicontrol ( 'Parent'                  , obj.cntControl                                ...
@@ -176,9 +178,10 @@ classdef MovieSlider < uix.VBox
                                     );
       obj.txtInfo       = uicontrol ( 'Parent'                  , obj.cntControl                                ...
                                     , 'Style'                   , 'edit'                                        ...
-                                    , 'Enable'                  , 'on'                                          ...
+                                    , 'Enable'                  , 'inactive'                                    ...
                                     , 'FontSize'                , MovieSlider.GUI_FONT - 3                      ...
                                     , 'Callback'                , @obj.editSetFrame                             ...
+                                    , 'ButtonDownFcn'           , @obj.enableSetFrame                           ...
                                     , 'TooltipString'           , 'Set frame'                                   ...
                                     );
       obj.btnConfig     = uicontrol ( 'Parent'                  , obj.cntControl                                ...
@@ -227,15 +230,15 @@ classdef MovieSlider < uix.VBox
                                     , 'TooltipString'           , 'Last frame'                                  ...
                                     );
                      
-      % Configure formatting and sizes
+      %% Configure formatting and sizes
       axis( obj.axsMovie, 'image', 'ij');
       set ( obj.cntControl, 'Widths'  , [0 6 1 1 1 1 -1 1] * MovieSlider.GUI_BTNSIZE );
       set ( obj           , 'Heights' , [-1 MovieSlider.GUI_BTNSIZE]               );
         
-      % Listeners for frame scrolling
+      %% Listeners for frame scrolling
       obj.lsnScroll     = addlistener(obj.sldFrame, 'ContinuousValueChange', @obj.drawFrame);
       
-      % Callback for mouseover info display and keyboard commands
+      %% Callback for mouseover info display and keyboard commands
       obj.figParent     = findParent(parent, 'figure');
       movieSliders      = get(obj.figParent, 'UserData');
       if isempty(movieSliders)
@@ -250,14 +253,14 @@ classdef MovieSlider < uix.VBox
           , 'WindowKeyPressFcn'     , @MovieSlider.keyboardControl                  ...
           );
       
-      % Playback timer
+      %% Playback timer
       obj.tmrPlayback   = timer ( 'TimerFcn'        , @obj.playMovie          ...
                                 , 'ExecutionMode'   ,'fixedRate'              ...
                                 , 'BusyMode'        ,'drop'                   ...
                                 );
 
         
-      % Shortcut to load a given movie at construction time
+      %% Shortcut to load a given movie at construction time
       if ~isempty(varargin)
         obj.show(varargin{:});
       end
@@ -371,6 +374,26 @@ classdef MovieSlider < uix.VBox
       
     end
     
+    %----- Sets the display region size for this MovieSlider
+    function displayPos = setSize(obj, widthInPixels, heightInPixels)
+      %% Compute required size of figure to contain the desired display area size
+      figSize         = get(obj.figParent, 'Position');
+      figCorner       = figSize(1:2) + figSize(3:4);
+      targetSize      = [widthInPixels + 2*MovieSlider.GUI_BTNSIZE, heightInPixels + MovieSlider.GUI_BTNSIZE];
+      targetPos       = [max(1, figCorner - targetSize), targetSize];
+      
+      %% Set the figure and axes positions
+      displayPos      = [MovieSlider.GUI_BTNSIZE, MovieSlider.GUI_BTNSIZE, widthInPixels, heightInPixels];
+      
+      set(obj.figParent, 'Position', targetPos);
+      set(obj.axsMovie, 'Units', 'pixels');
+      set(obj.axsMovie, 'Position', displayPos);
+      
+      %% Restore normalized units so that the display area resizes with figure size
+      displayPos      = get(obj.axsMovie, 'Position');
+      set(obj.axsMovie, 'Units', 'normalized');
+    end
+    
     %----- Set playback rate
     function setPlaybackFPS(obj, playbackFPS)
       obj.playbackFPS = playbackFPS;
@@ -415,6 +438,8 @@ classdef MovieSlider < uix.VBox
       if nargin < 3
         index = handle;
       end
+      
+      index   = max(1, min(index, size(obj.movie,3)));
       if index ~= obj.currentFrame
         set(obj.sldFrame, 'Value', index);
         obj.drawFrame(index);
@@ -432,7 +457,44 @@ classdef MovieSlider < uix.VBox
       for prop = {'pixelPDF', 'pixelCDF', 'pixelValue', 'pixelRange'}
         dup.(prop{:}) = obj.(prop{:});
       end
-%       dup.setTitle(get(obj.titleMovie, 'String'));
+      
+      prop  = get(obj.title);
+      dup.setTitle(obj.frameTitle, prop{:}, 'Parent', dup.axsMovie);
+    end
+    
+    
+    %----- Saves all frames of this MovieSlider into a video file; see VideoWriter for allowed formats
+    function save(obj, outputFile, frameRate)
+      %% Default arguments
+      if nargin < 3
+        frameRate         = [];
+      end
+      
+      %% Optionally the user can provide a VideoWriter object with their desired configuration
+      if isa(outputFile, 'VideoWriter')
+        writer            = outputFile;
+      else
+        writer            = VideoWriter(outputFile);
+      end
+      
+      if ~isempty(frameRate)
+        writer.FrameRate  = frameRate;
+      end
+      
+      %% Save current state 
+      currentFrame        = obj.currentFrame;
+      
+      %% Iterate through frames and output into video file
+      open(writer);
+      for iFrame = 1:size(obj.movie,3)
+        obj.setFrame(iFrame);
+        frame             = getframe(obj.axsMovie);
+        writeVideo(writer, frame);
+      end
+      close(writer);
+      
+      %% Restore current state
+      obj.setFrame(currentFrame);
     end
     
   end
@@ -487,13 +549,21 @@ classdef MovieSlider < uix.VBox
     
     %----- Callback for user to enter the desired frame
     function editSetFrame(obj, handle, event, index)
-      value   = sscanf(get(handle, 'String'), '%d');
-      if isempty(value) || value < 1 || value > size(obj.movie,3)
-        return;
-      end
-      
+      set(handle, 'Enable', 'inactive');
+      uicontrol(obj.txtDummy);
       stop(obj.tmrPlayback);
+      
+      value   = sscanf(get(handle, 'String'), '%d');
+      if isempty(value)
+        value = obj.currentFrame;
+      end
       obj.setFrame(value);
+    end
+    
+    %----- Callback for user to enter the desired frame
+    function enableSetFrame(obj, handle, event, index)
+      set(handle, 'Enable', 'on', 'String', '');
+      uicontrol(handle);
     end
     
     %----- Callback to set whether the movie replays when at the end
@@ -517,6 +587,26 @@ classdef MovieSlider < uix.VBox
       end
     end
     
+    %----- Helper for drawFrame() that only affects this object
+    function doDrawFrame(obj, iFrame)
+      set(obj.imgMovie, 'CData', obj.movie(:,:,iFrame), 'UserData', iFrame);
+      obj.currentFrame      = iFrame;
+      set(obj.txtInfo, 'String', sprintf('%d/%d', iFrame, size(obj.movie,3)));
+
+      % Update title per frame
+      if ~isempty(obj.frameTitle)
+        set(obj.titleMovie, 'String', obj.frameTitle{iFrame});
+      end
+
+      % Update illustration objects per frame
+      for iIllus = 1:numel(obj.illustration)
+        prop    = [ obj.illusProperty{iIllus}           ...
+                  ; obj.illusValue{iIllus}(iFrame,:)    ...
+                  ];
+        set( obj.illustration(iIllus), prop{:} );
+      end
+    end
+    
     %----- Callback for scrolling between frames
     function drawFrame(obj, handle, event, doForce)
       
@@ -534,22 +624,7 @@ classdef MovieSlider < uix.VBox
       
       % Update frame only if different from previous
       if doForce || iFrame ~= obj.currentFrame
-        set(obj.imgMovie, 'CData', obj.movie(:,:,iFrame), 'UserData', iFrame);
-        obj.currentFrame      = iFrame;
-        set(obj.txtInfo, 'String', sprintf('%d/%d', iFrame, size(obj.movie,3)));
-        
-        % Update title per frame
-        if ~isempty(obj.frameTitle)
-          set(obj.titleMovie, 'String', obj.frameTitle{iFrame});
-        end
-        
-        % Update illustration objects per frame
-        for iIllus = 1:numel(obj.illustration)
-          prop    = [ obj.illusProperty{iIllus}           ...
-                    ; obj.illusValue{iIllus}(iFrame,:)    ...
-                    ];
-          set( obj.illustration(iIllus), prop{:} );
-        end
+        obj.doDrawFrame(iFrame);
       end
       
       % Scroll to the same frame for all associated MovieSlider siblings
@@ -557,10 +632,8 @@ classdef MovieSlider < uix.VBox
       for iSib = 1:numel(obj.syncSiblings)
         other     = obj.syncSiblings(iSib);
         jFrame    = min(size(other.movie,3), max(1, iFrame));
-        if jFrame ~= other.currentFrame
-          set(other.imgMovie, 'CData', other.movie(:,:,jFrame), 'UserData', jFrame);
-          other.currentFrame  = jFrame;
-          set(other.txtInfo, 'String', sprintf('%d/%d', jFrame, size(other.movie,3)));
+        if doForce || jFrame ~= other.currentFrame
+          other.doDrawFrame(jFrame);
         end
       end
     
