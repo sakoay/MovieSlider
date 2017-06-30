@@ -54,7 +54,7 @@ classdef MovieSlider < uix.VBox
     CONTRAST_RANGE        = 6e-9 * (1:10:100).^4
 
     DIALOG_POSITION       = [0.4 0.35 0.2 0.3]
-    DIALOG_MONITOR        = -1
+    DIALOG_MONITOR        = MovieSlider.getMonitorBySize()
 
     SELECT_COLOR          = cat(3, 156, 230, 255)/255
     GUI_COLOR             = cat(3, 0.9400, 0.9400, 0.9400)
@@ -114,11 +114,11 @@ classdef MovieSlider < uix.VBox
   %------- Public data
   properties (SetAccess = protected)
     movie
+    totalFrames
     frameTitle            = {}
 
-    binnedMovie
     pixelPDF              = [0 0]
-    pixelCDF              = [0 0]
+    pixelCDF              = [0 1]
     pixelValue            = [0 1]
     pixelDomain           = [-inf inf]
     pixelRange            = [0 1]
@@ -284,7 +284,7 @@ classdef MovieSlider < uix.VBox
     %----- Sets the currently displayed movie
     function show(obj, movie, colors, pixelDomain, contrast, contrastIndex)
       
-      % Default arguments 
+      %% Default arguments 
       if nargin < 3 || isempty(colors)
         colors          = 'default';
       end
@@ -303,24 +303,29 @@ classdef MovieSlider < uix.VBox
       end
       
       
-      % Movie properties
+      %% Movie properties
       obj.movie         = movie;
-      if size(obj.movie,3) >= MovieSlider.MIN_NUMBINS * MovieSlider.CONTRAST_BINNING
-        obj.binnedMovie = rebin(obj.movie, MovieSlider.CONTRAST_BINNING, 3, @mean, 'omitnan');
+      obj.totalFrames   = size(obj.movie, ndims(obj.movie));
+      
+      %% Contrast determination only for 3D movies (as opposed to directly provided RGB)
+      if ndims(obj.movie) == 3
+        if obj.totalFrames >= MovieSlider.MIN_NUMBINS * MovieSlider.CONTRAST_BINNING
+          binnedMovie   = rebin(obj.movie, MovieSlider.CONTRAST_BINNING, 3, @mean, 'omitnan');
       else
-        obj.binnedMovie = obj.movie;
+          binnedMovie   = obj.movie;
       end
       if islogical(contrast) && numel(contrast) == size(movie,1)*size(movie,2)
-        imgMask         = frameMask(size(obj.binnedMovie), contrast, 1);
-        [obj.pixelPDF, edges] = histcounts(obj.binnedMovie(imgMask), 'Normalization', 'prob');
+          imgMask       = frameMask(size(binnedMovie), contrast, 1);
+          [obj.pixelPDF, edges] = histcounts(binnedMovie(imgMask), 'Normalization', 'prob');
         if nargin > 5
           contrast      = contrastIndex;
         else
           contrast      = 1;
         end
       else
-        [obj.pixelPDF, edges] = histcounts(obj.binnedMovie, 'Normalization', 'prob');
+          [obj.pixelPDF, edges] = histcounts(binnedMovie, 'Normalization', 'prob');
       end
+      
       if numel(obj.pixelPDF) < 2
         obj.pixelPDF    = [0 1];
         obj.pixelValue  = [0 1];
@@ -332,8 +337,9 @@ classdef MovieSlider < uix.VBox
       
       obj.colors        = colors;
       obj.currentFrame  = 1;
+      end
       
-      % Movie frame display
+      %% Movie frame display
       set ( obj.axsMovie                                                              ...
           , 'XLim'                    , [0.5, 0.5+max(1,size(movie,2))]               ...
           , 'YLim'                    , [0.5, 0.5+max(1,size(movie,1))]               ...
@@ -344,22 +350,27 @@ classdef MovieSlider < uix.VBox
             , 'UserData'              , obj.currentFrame                              ...
             );
       else
+        if ndims(movie) == 3
+          movieFrame      = movie(:,:,obj.currentFrame);
+        else
+          movieFrame      = movie(:,:,:,obj.currentFrame);
+        end
         set ( obj.imgMovie                                                            ...
-            , 'CData'                 , movie(:,:,obj.currentFrame)                   ...
+            , 'CData'                 , movieFrame                                    ...
             , 'UserData'              , obj.currentFrame                              ...
             );
       set ( obj.sldFrame                                                              ...
           , 'Min'                     , 1                                             ...
-          , 'Max'                     , size(movie,3)                                 ...
-          , 'SliderStep'              , min([1 MovieSlider.FRAME_STEP]/(size(movie,3) - 1), 1)  ...
+            , 'Max'                   , obj.totalFrames                               ...
+            , 'SliderStep'            , min([1 MovieSlider.FRAME_STEP]/(obj.totalFrames - 1), 1)  ...
           , 'Value'                   , obj.currentFrame                              ...
           );
       set ( obj.btnEnd                                                                ...
-          , 'Callback'                , {@obj.setFrame, size(movie,3)}                ...
+            , 'Callback'              , {@obj.setFrame, obj.totalFrames}              ...
           );
       end
 
-      if size(movie,3) > 1
+      if obj.totalFrames > 1
         set(obj.sldFrame, 'Enable', 'on');
       else
         set(obj.sldFrame, 'Enable', 'off');
@@ -368,7 +379,7 @@ classdef MovieSlider < uix.VBox
 
       stop(obj.tmrPlayback);
 
-      % Apply formatting
+      %% Apply formatting
       colormap( obj.axsMovie, colors );
       obj.setContrast(contrast);
       
@@ -376,10 +387,15 @@ classdef MovieSlider < uix.VBox
     
     %----- Sets the display region size for this MovieSlider
     function displayPos = setSize(obj, widthInPixels, heightInPixels)
+      if nargin < 3 && numel(widthInPixels) == 2
+        heightInPixels  = widthInPixels(1);
+        widthInPixels   = widthInPixels(2);
+      end
+      
       %% Compute required size of figure to contain the desired display area size
       figSize         = get(obj.figParent, 'Position');
       figCorner       = figSize(1:2) + figSize(3:4);
-      targetSize      = [widthInPixels + 2*MovieSlider.GUI_BTNSIZE, heightInPixels + MovieSlider.GUI_BTNSIZE];
+      targetSize        = [widthInPixels + 2*MovieSlider.GUI_BTNSIZE, heightInPixels + 3*MovieSlider.GUI_BTNSIZE];
       targetPos       = [max(1, figCorner - targetSize), targetSize];
       
       %% Set the figure and axes positions
@@ -439,7 +455,7 @@ classdef MovieSlider < uix.VBox
         index = handle;
       end
       
-      index   = max(1, min(index, size(obj.movie,3)));
+      index   = max(1, min(index, obj.totalFrames));
       if index ~= obj.currentFrame
         set(obj.sldFrame, 'Value', index);
         obj.drawFrame(index);
@@ -464,7 +480,7 @@ classdef MovieSlider < uix.VBox
     
     
     %----- Saves all frames of this MovieSlider into a video file; see VideoWriter for allowed formats
-    function save(obj, outputFile, frameRate)
+    function save(obj, outputFile, frameRate, varargin)
       %% Default arguments
       if nargin < 3
         frameRate         = [];
@@ -474,7 +490,7 @@ classdef MovieSlider < uix.VBox
       if isa(outputFile, 'VideoWriter')
         writer            = outputFile;
       else
-        writer            = VideoWriter(outputFile);
+        writer            = VideoWriter(outputFile, varargin{:});
       end
       
       if ~isempty(frameRate)
@@ -486,7 +502,7 @@ classdef MovieSlider < uix.VBox
       
       %% Iterate through frames and output into video file
       open(writer);
-      for iFrame = 1:size(obj.movie,3)
+      for iFrame = 1:obj.totalFrames
         obj.setFrame(iFrame);
         frame             = getframe(obj.axsMovie);
         writeVideo(writer, frame);
@@ -514,12 +530,16 @@ classdef MovieSlider < uix.VBox
       if shift < 0
         obj.setFrame(max(1, obj.currentFrame + shift));
       else
-        obj.setFrame(min(size(obj.movie,3), obj.currentFrame + shift));
+        obj.setFrame(min(obj.totalFrames, obj.currentFrame + shift));
       end
     end
     
     %----- Set contrast level
     function setContrast(obj, contrast)
+      if ndims(obj.movie) > 3
+        return;
+      end
+      
       if numel(contrast) == 1
         obj.contrastIndex   = max(1, min(contrast, numel(MovieSlider.CONTRAST_RANGE)));
         saturation          = MovieSlider.CONTRAST_RANGE(obj.contrastIndex);
@@ -589,16 +609,22 @@ classdef MovieSlider < uix.VBox
     
     %----- Helper for drawFrame() that only affects this object
     function doDrawFrame(obj, iFrame)
+      %% Set movie frame image
+      if ndims(obj.movie) == 3
       set(obj.imgMovie, 'CData', obj.movie(:,:,iFrame), 'UserData', iFrame);
+      else
+        set(obj.imgMovie, 'CData', obj.movie(:,:,:,iFrame), 'UserData', iFrame);
+      end
+      
       obj.currentFrame      = iFrame;
-      set(obj.txtInfo, 'String', sprintf('%d/%d', iFrame, size(obj.movie,3)));
+      set(obj.txtInfo, 'String', sprintf('%d/%d', iFrame, obj.totalFrames));
 
-      % Update title per frame
+      %% Update title per frame
       if ~isempty(obj.frameTitle)
         set(obj.titleMovie, 'String', obj.frameTitle{iFrame});
       end
 
-      % Update illustration objects per frame
+      %% Update illustration objects per frame
       for iIllus = 1:numel(obj.illustration)
         prop    = [ obj.illusProperty{iIllus}           ...
                   ; obj.illusValue{iIllus}(iFrame,:)    ...
@@ -614,7 +640,7 @@ classdef MovieSlider < uix.VBox
       if isnumeric(handle)
         iFrame    = handle;
       else
-        iFrame    = min(size(obj.movie,3), max(1, round(get(handle, 'Value'))));
+        iFrame    = min(obj.totalFrames, max(1, round(get(handle, 'Value'))));
       end
       if nargin > 2 && islogical(event)
         doForce   = event;
@@ -631,7 +657,7 @@ classdef MovieSlider < uix.VBox
       obj.checkSiblings();
       for iSib = 1:numel(obj.syncSiblings)
         other     = obj.syncSiblings(iSib);
-        jFrame    = min(size(other.movie,3), max(1, iFrame));
+        jFrame    = min(other.totalFrames, max(1, iFrame));
         if doForce || jFrame ~= other.currentFrame
           other.doDrawFrame(jFrame);
         end
@@ -645,7 +671,7 @@ classdef MovieSlider < uix.VBox
     
     %----- Callback to load the next frame in playback mode
     function playMovie(obj, handle, event)
-      if obj.currentFrame >= size(obj.movie,3)
+      if obj.currentFrame >= obj.totalFrames
         if obj.doRepeat
           obj.currentFrame  = 0;
         else
@@ -669,7 +695,7 @@ classdef MovieSlider < uix.VBox
         
       % If not playing, start
       else
-        if obj.currentFrame >= size(obj.movie,3)
+        if obj.currentFrame >= obj.totalFrames
           obj.currentFrame  = 0;
         end
         
@@ -1123,7 +1149,7 @@ classdef MovieSlider < uix.VBox
         case 'home'
           slider.setFrame(1);
         case 'end'
-          slider.setFrame(size(slider.movie,3));
+          slider.setFrame(slider.totalFrames);
         case 'return'
           slider.togglePlayback(slider.btnPlay, event);
         case 'space'
@@ -1135,6 +1161,13 @@ classdef MovieSlider < uix.VBox
           end
       end
       
+    end
+
+    %----- Utility function to place MovieSlider on largest monitor
+    function index = getMonitorBySize()
+      monitors    = get(0,'monitor');
+      screenArea  = prod( monitors(:,3:end), 2 );
+      [~,index]   = max(screenArea);
     end
     
   end
