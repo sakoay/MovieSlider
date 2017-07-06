@@ -541,20 +541,25 @@ classdef MovieSlider < uix.VBox
       end
       
       if numel(contrast) == 1
+        %% Select only values of CDF that are unique
         obj.contrastIndex   = max(1, min(contrast, numel(MovieSlider.CONTRAST_RANGE)));
         saturation          = MovieSlider.CONTRAST_RANGE(obj.contrastIndex);
         sel                 = [1, 1 + find(diff(obj.pixelCDF) ~= 0)];
         
+        %% The following avoids creating very large ranges in the case of many empty bins in the PDF
         iValue              = interp1(obj.pixelCDF(sel), 1:numel(sel), [saturation, 1-saturation], 'linear', 'extrap');
-        obj.pixelRange      = obj.pixelValue([1 end]);
         inRange             = iValue > 1 & iValue < numel(sel);
         iValue              = iValue(inRange);
-        pdfLo               = obj.pixelValue(floor(iValue));
-        pdfUp               = obj.pixelValue(ceil(iValue));
+        pdfLo               = obj.pixelValue(sel(floor(iValue)));
+        pdfUp               = obj.pixelValue(sel(ceil(iValue)));
+        
+        %% Default to maximum range unless there is a valid solution above
+        obj.pixelRange      = obj.pixelValue([1 end]);
         obj.pixelRange(inRange) = pdfLo + (pdfUp - pdfLo) .* (iValue - floor(iValue));
         
 %         obj.pixelRange      = interp1(obj.pixelCDF(sel), obj.pixelValue(sel), [saturation, 1-saturation], 'linear', 'extrap');
         
+        %% Domain-specific constraints (e.g. fix left edge at 0 for positive domain)
         sel                 = isfinite(obj.pixelDomain);
         obj.pixelRange(sel) = obj.pixelDomain(sel);
       elseif contrast(2) > contrast(1)
