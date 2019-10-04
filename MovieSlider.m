@@ -133,6 +133,8 @@ classdef MovieSlider < uix.VBox
     imgMovie
     titleMovie            = gobjects(1)
     illustration          = gobjects(0)
+    imgX                  = []
+    imgY                  = []
   end
   properties
     overlay               = struct()
@@ -149,7 +151,7 @@ classdef MovieSlider < uix.VBox
       if nargin < 1
         parent          = figure;
       elseif isnumeric(parent) || numel(parent) > 1 || ~ishghandle(parent)
-        varargin        = [parent, varargin];
+        varargin        = [{parent}, varargin];
         parent          = figure;
       end
       obj@uix.VBox( 'Parent', parent );
@@ -162,6 +164,9 @@ classdef MovieSlider < uix.VBox
                                     , 'Layer'                   , 'top'                                         ...
                                     , 'XTick'                   , []                                            ...
                                     , 'YTick'                   , []                                            ...
+                                    , 'Color'                   , [0 0 0]                                       ...
+                                    , 'XColor'                  , [0 0 0]                                       ...
+                                    , 'YColor'                  , [0 0 0]                                       ...
                                     );
       obj.imgMovie      = image     ( 'Parent'                  , obj.axsMovie                                  ...
                                     , 'CData'                   , []                                            ...
@@ -265,6 +270,8 @@ classdef MovieSlider < uix.VBox
         obj.show(varargin{:});
       end
       
+      MovieSlider.registry(obj);
+      
     end
     
     %----- Destructor
@@ -285,8 +292,16 @@ classdef MovieSlider < uix.VBox
     function show(obj, movie, colors, pixelDomain, contrast, contrastIndex)
       
       %% Default arguments 
-      if nargin < 3 || isempty(colors)
-        colors          = 'default';
+      if iscell(movie)
+        xCoord          = movie{1};
+        yCoord          = movie{2};
+        movie           = movie{3};
+      else
+        xCoord          = [];
+        yCoord          = [];
+      end
+      if nargin < 3
+        colors          = [];
       end
       if nargin < 4 || isempty(pixelDomain)
         if min(movie(:)) == 0
@@ -305,10 +320,10 @@ classdef MovieSlider < uix.VBox
       
       %% Movie properties
       obj.movie         = movie;
-      obj.totalFrames   = size(obj.movie, ndims(obj.movie));
+      obj.totalFrames   = size(obj.movie, max(3,ndims(obj.movie)));
       
       %% Contrast determination only for 3D movies (as opposed to directly provided RGB)
-      if ndims(obj.movie) == 3
+      if ndims(obj.movie) < 4
         if obj.totalFrames >= MovieSlider.MIN_NUMBINS * MovieSlider.CONTRAST_BINNING
           binnedMovie   = rebin(obj.movie, MovieSlider.CONTRAST_BINNING, 3, @mean, 'omitnan');
       else
@@ -334,9 +349,9 @@ classdef MovieSlider < uix.VBox
       end
       obj.pixelCDF      = cumsum(obj.pixelPDF);
       obj.pixelDomain   = pixelDomain;
-      
-      obj.colors        = colors;
       obj.currentFrame  = 1;
+      elseif isempty(colors)
+        colors            = 'default';
       end
       
       %% Movie frame display
@@ -355,10 +370,6 @@ classdef MovieSlider < uix.VBox
         else
           movieFrame      = movie(:,:,:,obj.currentFrame);
         end
-        set ( obj.imgMovie                                                            ...
-            , 'CData'                 , movieFrame                                    ...
-            , 'UserData'              , obj.currentFrame                              ...
-            );
       set ( obj.sldFrame                                                              ...
           , 'Min'                     , 1                                             ...
             , 'Max'                   , obj.totalFrames                               ...
@@ -368,6 +379,21 @@ classdef MovieSlider < uix.VBox
       set ( obj.btnEnd                                                                ...
             , 'Callback'              , {@obj.setFrame, obj.totalFrames}              ...
           );
+        
+        %% Special case for patch-based display, if custom x- and y-coordinates are provided
+        if isempty(xCoord) && isempty(yCoord)
+          set ( obj.imgMovie                                                            ...
+              , 'CData'                 , movieFrame                                    ...
+              , 'UserData'              , obj.currentFrame                              ...
+              );
+        else
+          %%
+          delete(obj.imgMovie);
+          [obj.imgMovie, ~, obj.imgX, obj.imgY]     ...
+                          = imagenan(obj.axsMovie, xCoord, yCoord, movieFrame, false);
+          set(obj.imgMovie, 'UserData', obj.currentFrame);
+          set(obj.axsMovie, 'XLim', obj.imgX([1 end]), 'YLim', obj.imgY([1 end]));
+        end
       end
 
       if obj.totalFrames > 1
@@ -380,8 +406,20 @@ classdef MovieSlider < uix.VBox
       stop(obj.tmrPlayback);
 
       %% Apply formatting
-      colormap( obj.axsMovie, colors );
       obj.setContrast(contrast);
+      
+      %% Use temperature palette if the movie sufficiently spans both negative and positive values
+      if isempty(colors)
+        colors            = parula;
+        pixelSpread       = quantile(binnedMovie(:), [0.1, 0.9]);
+        if pixelSpread(1) < 0 && pixelSpread(2) > 0 && -pixelSpread(1) > 0.5*pixelSpread(2) && pixelSpread(2) > -0.5*pixelSpread(1)
+          colors          = temp4();
+          obj.pixelRange  = [-1 1]*max(abs(obj.pixelRange));
+          set(obj.axsMovie, 'CLim', obj.pixelRange);
+        end
+      end
+      obj.colors        = colors;
+      colormap( obj.axsMovie, colors );
       
     end
     
@@ -423,6 +461,10 @@ classdef MovieSlider < uix.VBox
         obj.titleMovie  = gobjects(1);
         obj.frameTitle  = {};
       elseif iscell(string)
+        obj.titleMovie  = title(obj.axsMovie, string{obj.currentFrame}, varargin{:});
+        obj.frameTitle  = string;
+      elseif isnumeric(string) && numel(string) == obj.totalFrames
+        string          = arrayfun(@(x) sprintf('%.4g',x), string, 'UniformOutput', false);
         obj.titleMovie  = title(obj.axsMovie, string{obj.currentFrame}, varargin{:});
         obj.frameTitle  = string;
       else
@@ -467,73 +509,6 @@ classdef MovieSlider < uix.VBox
       obj.fcnReturn = fcnReturn;
     end
     
-    %----- Makes a clone of this MovieSlider in a new figure
-    function clone(obj, handle, event)
-      dup   = MovieSlider(figure, obj.movie, obj.colors, obj.pixelDomain, obj.contrastIndex);
-      for prop = {'pixelPDF', 'pixelCDF', 'pixelValue', 'pixelRange'}
-        dup.(prop{:}) = obj.(prop{:});
-      end
-      
-      prop  = get(obj.title);
-      dup.setTitle(obj.frameTitle, prop{:}, 'Parent', dup.axsMovie);
-    end
-    
-    
-    %----- Saves all frames of this MovieSlider into a video file; see VideoWriter for allowed formats
-    function save(obj, outputFile, frameRate, varargin)
-      %% Default arguments
-      if nargin < 3
-        frameRate         = [];
-      end
-      
-      %% Optionally the user can provide a VideoWriter object with their desired configuration
-      if isa(outputFile, 'VideoWriter')
-        writer            = outputFile;
-      else
-        writer            = VideoWriter(outputFile, varargin{:});
-      end
-      
-      if ~isempty(frameRate)
-        writer.FrameRate  = frameRate;
-      end
-      
-      %% Save current state 
-      currentFrame        = obj.currentFrame;
-      
-      %% Iterate through frames and output into video file
-      open(writer);
-      for iFrame = 1:obj.totalFrames
-        obj.setFrame(iFrame);
-        frame             = getframe(obj.axsMovie);
-        writeVideo(writer, frame);
-      end
-      close(writer);
-      
-      %% Restore current state
-      obj.setFrame(currentFrame);
-    end
-    
-  end
-  
-
-  %________________________________________________________________________
-  methods (Access = protected)
-    
-    %----- Ensure that synchronized objects exist
-    function checkSiblings(obj)
-      obj.syncSiblings(~ishghandle(obj.syncSiblings)) = [];
-    end
-    
-    
-    %----- Shift the current frame by the given amount
-    function shiftFrame(obj, shift)
-      if shift < 0
-        obj.setFrame(max(1, obj.currentFrame + shift));
-      else
-        obj.setFrame(min(obj.totalFrames, obj.currentFrame + shift));
-      end
-    end
-    
     %----- Set contrast level
     function setContrast(obj, contrast)
       if ndims(obj.movie) > 3
@@ -571,6 +546,80 @@ classdef MovieSlider < uix.VBox
       set(obj.axsMovie, 'CLim', obj.pixelRange);
     end
     
+    
+    %----- Makes a clone of this MovieSlider in a new figure
+    function clone(obj, handle, event)
+      dup   = MovieSlider(figure, obj.movie, obj.colors, obj.pixelDomain, obj.contrastIndex);
+      for prop = {'pixelPDF', 'pixelCDF', 'pixelValue', 'pixelRange'}
+        dup.(prop{:}) = obj.(prop{:});
+      end
+      
+      prop  = get(obj.title);
+      dup.setTitle(obj.frameTitle, prop{:}, 'Parent', dup.axsMovie);
+    end
+    
+    %----- Saves all frames of this MovieSlider into a video file; see VideoWriter for allowed formats
+    function save(obj, outputFile, frameRate, varargin)
+      %% Default arguments
+      if nargin < 3
+        frameRate         = [];
+      end
+      
+      %% Optionally the user can provide a VideoWriter object with their desired configuration
+      if isa(outputFile, 'VideoWriter')
+        writer            = outputFile;
+      else
+        writer            = VideoWriter(outputFile, varargin{1:min(1,end)});
+      end
+      
+      if ~isempty(frameRate)
+        writer.FrameRate  = frameRate;
+      end
+      for iArg = 2:2:numel(varargin)-1
+        writer.(varargin{iArg}) = varargin{iArg+1};
+      end
+      
+      %% Save current state 
+      currentFrame        = obj.currentFrame;
+      isGrayscale         = get(writer, 'ColorChannels') == 1 && ndims(obj.movie) <= 3;
+      
+      %% Iterate through frames and output into video file
+      open(writer);
+      if isGrayscale
+        writeVideo(writer, reshape(obj.movie, size(obj.movie,1), size(obj.movie,2), 1, []));
+      else
+      for iFrame = 1:obj.totalFrames
+        obj.setFrame(iFrame);
+        frame             = getframe(obj.axsMovie);
+        writeVideo(writer, frame);
+      end
+      end
+      close(writer);
+      
+      %% Restore current state
+      obj.setFrame(currentFrame);
+    end
+    
+  end
+  
+
+  %________________________________________________________________________
+  methods (Access = protected)
+    
+    %----- Ensure that synchronized objects exist
+    function checkSiblings(obj)
+      obj.syncSiblings(~ishghandle(obj.syncSiblings)) = [];
+    end
+    
+    
+    %----- Shift the current frame by the given amount
+    function shiftFrame(obj, shift)
+      if shift < 0
+        obj.setFrame(max(1, obj.currentFrame + shift));
+      else
+        obj.setFrame(min(obj.totalFrames, obj.currentFrame + shift));
+      end
+    end
     
     %----- Callback for user to enter the desired frame
     function editSetFrame(obj, handle, event, index)
@@ -1038,8 +1087,26 @@ classdef MovieSlider < uix.VBox
   %________________________________________________________________________
   methods (Static)
 
+    %----- Returns the list of all MovieSlider objects ever created (and not deleted)
+    function sliders = registry(obj)
+      persistent  allSliders;
+      if isempty(allSliders)
+        allSliders        = gobjects(0);
+      end
+      
+      if nargin > 0
+        allSliders(end+1) = obj;
+      end
+      allSliders(~ishghandle(allSliders)) = [];
+      sliders             = allSliders;
+    end
+
     %----- Synchronize frame display of all given movie sliders
     function synchronizeFrames(sliders, doSync)
+      if nargin < 1
+        sliders = MovieSlider.registry();
+      end
+      
       if nargin < 2 || doSync
         for iMov = 1:numel(sliders)
           sliders(iMov).syncSiblings  = sliders([1:iMov-1, iMov+1:end]);
@@ -1080,18 +1147,41 @@ classdef MovieSlider < uix.VBox
           continue;
         end
         
-        mousePos        = round(get(movieSliders(iMov).axsMovie, 'CurrentPoint'));
+        mousePos        = get(movieSliders(iMov).axsMovie, 'CurrentPoint');
+        mousePos        = mousePos(1,:);
+        
+        %% Locate the pixel under the mouse pointer
+        if isempty(movieSliders(iMov).imgX)
+          %% Coordinates are exactly in pixels
+          pixel         = round(mousePos);
+          coord         = sprintf('%d,%d', pixel(2), pixel(1));
         xRange          = rangemin( get(movieSliders(iMov).axsMovie, 'XLim'), [1, size(movieSliders(iMov).movie,2)] );
         yRange          = rangemin( get(movieSliders(iMov).axsMovie, 'YLim'), [1, size(movieSliders(iMov).movie,1)] );
+          mousePos      = pixel;
+        else
+          %% Locate bins along the stored axes
+          pixel         = [ binarySearch(movieSliders(iMov).imgX(1:end-1), mousePos(1), -1, -1)      ...
+                          , binarySearch(movieSliders(iMov).imgY(1:end-1), mousePos(2), -1, -1)      ...
+                          ];
+          coord         = sprintf('.3g,%.3g', mean(movieSliders(iMov).imgY(pixel(2) + (0:1))), mean(movieSliders(iMov).imgX(pixel(1) + (0:1))));
+          xRange        = rangemin( get(movieSliders(iMov).axsMovie, 'XLim'), movieSliders(iMov).imgX([1 end]) );
+          yRange        = rangemin( get(movieSliders(iMov).axsMovie, 'YLim'), movieSliders(iMov).imgY([1 end]) );
+        end
         
-        if      mousePos(1,2) >= yRange(1) && mousePos(1,2) <= yRange(2)    ...
-            &&  mousePos(1,1) >= xRange(1) && mousePos(1,1) <= xRange(2)
-          set ( movieSliders(iMov).txtInfo                                  ...
-              , 'String'    , sprintf ( '(%d,%d,%d)=%.4g'                   ...
-                                      , mousePos(1,2), mousePos(1,1), movieSliders(iMov).currentFrame                             ...
-                                      , movieSliders(iMov).movie(mousePos(1,2), mousePos(1,1), movieSliders(iMov).currentFrame)   ...
-                                      ) ...
-              );
+        %% If in range, set the pixel display
+        if mousePos(1) >= xRange(1) && mousePos(1) <= xRange(2) && mousePos(2) >= yRange(1) && mousePos(2) <= yRange(2)
+          %% Format movie value depending on whether it is in RGB form or a scalar index
+          if ndims(movieSliders(iMov).movie) > 3
+            value       = arrayfun( @(x) sprintf('%.3g',x)                                                              ...
+                                  , movieSliders(iMov).movie(pixel(2), pixel(1), :, movieSliders(iMov).currentFrame)    ...
+                                  , 'UniformOutput', false );
+            value       = sprintf('[%s]', strjoin(value, ', '));
+          else
+            value       = sprintf('%.4g', movieSliders(iMov).movie(pixel(2), pixel(1), movieSliders(iMov).currentFrame));
+          end
+          
+          %% Can stop after locating one valid display since MovieSliders are presumably not overlapping
+          set( movieSliders(iMov).txtInfo, 'String', sprintf( '(%s,%d)=%s', coord, movieSliders(iMov).currentFrame, value ));
           return;
         end
       end
