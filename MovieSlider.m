@@ -413,7 +413,7 @@ classdef MovieSlider < uix.VBox
         colors            = parula;
         pixelSpread       = quantile(binnedMovie(:), [0.1, 0.9]);
         if pixelSpread(1) < 0 && pixelSpread(2) > 0 && -pixelSpread(1) > 0.5*pixelSpread(2) && pixelSpread(2) > -0.5*pixelSpread(1)
-          colors          = temp4();
+          colors          = cool();
           obj.pixelRange  = [-1 1]*max(abs(obj.pixelRange));
           set(obj.axsMovie, 'CLim', obj.pixelRange);
         end
